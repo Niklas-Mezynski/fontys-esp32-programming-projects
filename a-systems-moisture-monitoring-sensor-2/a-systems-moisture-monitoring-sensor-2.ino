@@ -27,10 +27,10 @@ void loop()
 /**
  * -- ESP32 connections --
  * Left -> Right
- * Red: VCC
- * White: S CL
- * Green: S DA
- * Black: GND
+ * Red: VCC -> +5V (V5)
+ * White: -> S CL (G22)
+ * Green: -> S DA (G21)
+ * Black: GND -> GND (GND)
  */
 
 #define ADDR_2ND 0x20 // Input addr for I2C channel
