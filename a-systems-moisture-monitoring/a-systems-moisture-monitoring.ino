@@ -12,24 +12,26 @@
 #include <stdlib.h>
 #include <time.h>
 #include <Wire.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 // Comment in/out for toggling debug mode (Serial prints and so on)
-#define DEBUG
+// #define DEBUG
 
 // WiFi Connection
 const char *ssid = "MagentaWLAN-Mezynski";
 const char *password = "MANS4mezy";
 
 // HTTP definitions
-// const char *url = "https://webserver-a-systems-individual-production.up.railway.app/trpc/sensors.addSensorData";
-const char *url = "http://192.168.2.52:3002/trpc/sensors.addSensorData"; // For TESTING!
+const char *url = "https://webserver-a-systems-individual-production.up.railway.app/trpc/sensors.addSensorData";
+// const char *url = "http://192.168.2.52:3002/trpc/sensors.addSensorData"; // For TESTING!
 const char *apiAuthorization = "E3o8zuQp3W2izyvmBK0DqGhFecWtEqEa";
 
 // Sensor definitions (General)
-// const int MILLIS_BETWEEN_READINGS = 3000;       // 3 Seconds
-// const int MILLIS_BETWEEN_DATA_SENDING = 300000; // 5 Minutes
-const int MILLIS_BETWEEN_READINGS = 1000;      // 1 Seconds - For TESTING!
-const int MILLIS_BETWEEN_DATA_SENDING = 60000; // 1 Minute - For TESTING!
+const int MILLIS_BETWEEN_READINGS = 3000;       // 3 Seconds
+const int MILLIS_BETWEEN_DATA_SENDING = 300000; // 5 Minutes
+// const int MILLIS_BETWEEN_READINGS = 1000;      // 1 Seconds - For TESTING!
+// const int MILLIS_BETWEEN_DATA_SENDING = 60000; // 1 Minute - For TESTING!
 const int NUM_READINGS = MILLIS_BETWEEN_DATA_SENDING / MILLIS_BETWEEN_READINGS;
 
 // Class or struct "Sensor" that contains the sensor data and the sensor type
@@ -37,6 +39,45 @@ class Sensor
 {
 private:
   int idx;
+
+  void postSensorData()
+  {
+    float averageRaw = this->getRollingAverage();
+    float averagePerc = this->getPercentageAverage();
+
+    // Create a JSON document
+    StaticJsonDocument<200> doc;
+    doc["rawValue"] = static_cast<int>(averageRaw);
+    doc["humidity"] = averagePerc;
+    doc["sensorType"] = this->sensorName;
+
+    // Serialize the JSON document to a string
+    String json;
+    serializeJson(doc, json);
+
+    // Send an HTTP POST request to the REST API
+    HTTPClient http;
+    http.begin(url);
+    http.addHeader("Content-Type", "application/json");
+    http.addHeader("Authorization", apiAuthorization);
+    int httpCode = http.POST(json);
+#ifdef DEBUG
+    if (httpCode > 0)
+    {
+      Serial.printf("[HTTP] POST request sent, status code: %d\n", httpCode);
+      String response = http.getString();
+      Serial.println(response);
+    }
+    else
+    {
+      Serial.printf("[HTTP] POST request failed, error: %s\n", http.errorToString(httpCode).c_str());
+    }
+#endif
+    http.end();
+
+    // Delete the task so it exits cleanly
+    vTaskDelete(NULL);
+  }
 
 public:
   uint8_t pin;
@@ -88,40 +129,10 @@ public:
     return this->totalPerc / (float)NUM_READINGS;
   }
 
-  void postSensorData()
+  static void sendDataWrapper(void *parameter)
   {
-    float averageRaw = this->getRollingAverage();
-    float averagePerc = this->getPercentageAverage();
-
-    // Create a JSON document
-    StaticJsonDocument<200> doc;
-    doc["rawValue"] = static_cast<int>(averageRaw);
-    doc["humidity"] = averagePerc;
-    doc["sensorType"] = this->sensorName;
-
-    // Serialize the JSON document to a string
-    String json;
-    serializeJson(doc, json);
-
-    // Send an HTTP POST request to the REST API
-    HTTPClient http;
-    http.begin(url);
-    http.addHeader("Content-Type", "application/json");
-    http.addHeader("Authorization", apiAuthorization);
-    int httpCode = http.POST(json);
-#ifdef DEBUG
-    if (httpCode > 0)
-    {
-      Serial.printf("[HTTP] POST request sent, status code: %d\n", httpCode);
-      String response = http.getString();
-      Serial.println(response);
-    }
-    else
-    {
-      Serial.printf("[HTTP] POST request failed, error: %s\n", http.errorToString(httpCode).c_str());
-    }
-#endif
-    http.end();
+    Sensor *sensor = static_cast<Sensor *>(parameter);
+    sensor->postSensorData();
   }
 
   void printSensorData()
@@ -158,10 +169,13 @@ void setup()
 #endif
 
   // Initialize the sensors
-  // Sensor s1 = Sensor(36, "main", 0, 3500);
-  Sensor s2 = Sensor(36, "second", 4095, 2045);
+  Sensor s1 = Sensor(36, "first", 0, 3350);
+  Sensor s2 = Sensor(34, "second", 4095, 2010);
+  Sensor s3 = Sensor(32, "third", 4095, 2010);
 
+  sensors.push_back(s1);
   sensors.push_back(s2);
+  sensors.push_back(s3);
 
   connectWiFi();
 
@@ -198,7 +212,7 @@ void sendDataToServer()
   {
     for (auto &sensor : sensors)
     {
-      sensor.postSensorData();
+      xTaskCreate(Sensor::sendDataWrapper, "Task", 10000, &sensor, 1, NULL);
     }
     lastTime = currentTime;
   }
