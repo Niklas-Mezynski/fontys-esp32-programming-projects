@@ -12,11 +12,9 @@
 #include <stdlib.h>
 #include <time.h>
 #include <Wire.h>
-#include <freertos/FreeRTOS.h>
-#include <freertos/task.h>
 
 // Comment in/out for toggling debug mode (Serial prints and so on)
-#define DEBUG
+// #define DEBUG
 
 // WiFi Connection
 const char *ssid = "MagentaWLAN-Mezynski";
@@ -39,45 +37,6 @@ class Sensor
 {
 private:
   int idx;
-
-  void postSensorData()
-  {
-    float averageRaw = this->getRollingAverage();
-    float averagePerc = this->getPercentageAverage();
-
-    // Create a JSON document
-    StaticJsonDocument<200> doc;
-    doc["rawValue"] = static_cast<int>(averageRaw);
-    doc["humidity"] = averagePerc;
-    doc["sensorType"] = this->sensorName;
-
-    // Serialize the JSON document to a string
-    String json;
-    serializeJson(doc, json);
-
-    // Send an HTTP POST request to the REST API
-    HTTPClient http;
-    http.begin(url);
-    http.addHeader("Content-Type", "application/json");
-    http.addHeader("Authorization", apiAuthorization);
-    int httpCode = http.POST(json);
-#ifdef DEBUG
-    if (httpCode > 0)
-    {
-      Serial.printf("[HTTP] POST request sent, status code: %d\n", httpCode);
-      String response = http.getString();
-      Serial.println(response);
-    }
-    else
-    {
-      Serial.printf("[HTTP] POST request failed, error: %s\n", http.errorToString(httpCode).c_str());
-    }
-#endif
-    http.end();
-
-    // Delete the task so it exits cleanly
-    vTaskDelete(NULL);
-  }
 
 public:
   uint8_t pin;
@@ -129,10 +88,41 @@ public:
     return this->totalPerc / (float)NUM_READINGS;
   }
 
-  static void sendDataWrapper(void *parameter)
+  void postSensorData()
   {
-    Sensor *sensor = static_cast<Sensor *>(parameter);
-    sensor->postSensorData();
+    float averageRaw = this->getRollingAverage();
+    float averagePerc = this->getPercentageAverage();
+
+    // Create a JSON document
+    StaticJsonDocument<200> doc;
+    doc["rawValue"] = static_cast<int>(averageRaw);
+    doc["humidity"] = averagePerc;
+    doc["sensorType"] = this->sensorName;
+
+    // Serialize the JSON document to a string
+    String json;
+    serializeJson(doc, json);
+
+    // Send an HTTP POST request to the REST API
+    HTTPClient http;
+    http.begin(url);
+    http.addHeader("Content-Type", "application/json");
+    http.addHeader("Authorization", apiAuthorization);
+    int httpCode = http.POST(json);
+#ifdef DEBUG
+    if (httpCode > 0)
+    {
+      Serial.printf("[HTTP] POST request sent, status code: %d\n", httpCode);
+      String response = http.getString();
+      Serial.println(response);
+    }
+    else
+    {
+      Serial.printf("[HTTP] POST request failed, error: %s\n", http.errorToString(httpCode).c_str());
+    }
+#endif
+    http.end();
+    ;
   }
 
   void printSensorData()
@@ -198,6 +188,11 @@ void loop()
 
   sendDataToServer();
 
+#ifdef DEBUG
+  // Print free memory
+  Serial.printf("Free heap: %d Free [%d | %d]  \n", ESP.getFreeHeap(), esp_get_free_heap_size(), esp_get_minimum_free_heap_size());
+#endif
+
   delay(MILLIS_BETWEEN_READINGS);
 }
 
@@ -222,7 +217,7 @@ void sendDataToServer()
 
     for (auto &sensor : sensors)
     {
-      xTaskCreate(Sensor::sendDataWrapper, "Task", 10000, &sensor, 1, NULL);
+      sensor.postSensorData();
     }
     lastTime = currentTime;
   }
