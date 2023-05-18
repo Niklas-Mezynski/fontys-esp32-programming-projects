@@ -16,7 +16,7 @@
 #include <freertos/task.h>
 
 // Comment in/out for toggling debug mode (Serial prints and so on)
-// #define DEBUG
+#define DEBUG
 
 // WiFi Connection
 const char *ssid = "MagentaWLAN-Mezynski";
@@ -210,6 +210,16 @@ void sendDataToServer()
   // check if 5 minutes have passed since the last action
   if (currentTime - lastTime >= MILLIS_BETWEEN_DATA_SENDING)
   {
+
+    // Check if WiFi connection still works
+    if (WiFi.status() != WL_CONNECTED)
+    {
+#ifdef DEBUG
+      Serial.println("WiFi connection lost. Reconnecting...");
+#endif
+      connectWiFi();
+    }
+
     for (auto &sensor : sensors)
     {
       xTaskCreate(Sensor::sendDataWrapper, "Task", 10000, &sensor, 1, NULL);
@@ -220,18 +230,29 @@ void sendDataToServer()
 
 void connectWiFi()
 {
+  int tries = 0;
   WiFi.begin(ssid, password);
 
   while (WiFi.status() != WL_CONNECTED)
   {
-    switch (WiFi.status())
+    if (WiFi.status() == WL_CONNECT_FAILED)
     {
-    case WL_CONNECT_FAILED:
 #ifdef DEBUG
       Serial.println("WiFi connection failed!");
 #endif
-      break;
-    default:
+      return connectWiFi();
+    }
+    else
+    {
+      if (tries > 25)
+      {
+#ifdef DEBUG
+        Serial.println("WiFi connection failed!");
+#endif
+        return connectWiFi();
+      }
+
+      tries++;
       delay(500);
 #ifdef DEBUG
       Serial.println("Connecting to WiFi..");
